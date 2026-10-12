@@ -1,0 +1,60 @@
+name: Build-iOS-IPA
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: Build iOS IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Update CocoaPods Repo
+        run: pod repo update
+        working-directory: ios
+
+      - name: Build iOS No Codesign
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Payload to IPA
+        run: |
+          mkdir Payload
+          cp -r Runner.app Payload/
+          zip -qq -r -9 ScanOcr.ipa Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScanOcr-ipa
+          path: build/ios/iphoneos/ScanOcr.ipa
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ipa-v1.0.${{ github.run_number }}
+          name: Scan OCR iOS IPA v1.0.${{ github.run_number }}
+          body: |
+            ## Scan OCR iOS IPA Release (Unsigned)
+            - Tự động đóng gói từ nhánh `main` qua GitHub Actions.
+            - File IPA cài đặt trực tiếp qua TrollStore, AltStore, Sideloadly hoặc Scarlet.
+          files: build/ios/iphoneos/ScanOcr.ipa
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
