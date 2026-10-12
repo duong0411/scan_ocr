@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
-import '../core/services/gemini_ocr_service.dart';
-import '../core/services/storage_service.dart';
+import '../core/services/paddle_ocr_ffi_service.dart';
 import '../core/theme/app_theme.dart';
-import 'api_key_dialog.dart';
 
 class OcrHomeScreen extends StatefulWidget {
   const OcrHomeScreen({super.key});
@@ -17,13 +15,11 @@ class OcrHomeScreen extends StatefulWidget {
 class _OcrHomeScreenState extends State<OcrHomeScreen> {
   final ImagePicker _picker = ImagePicker();
 
-  String? _apiKey;
-  String _selectedModel = StorageService.defaultModel;
-
   Uint8List? _selectedImageBytes;
   String? _imageName;
   int? _imageSize;
 
+  bool _isEngineReady = false;
   bool _isLoading = false;
   String? _ocrResult;
   String? _errorMessage;
@@ -31,47 +27,31 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadConfig();
+    _initNcnnEngine();
   }
 
-  Future<void> _loadConfig() async {
-    final key = await StorageService.getApiKey();
-    final model = await StorageService.getSelectedModel();
-    setState(() {
-      _apiKey = key;
-      _selectedModel = model;
-    });
-
-    // If no key yet, prompt user
-    if (key == null || key.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showApiKeyDialog();
-      });
+  Future<void> _initNcnnEngine() async {
+    try {
+      final ready = await PaddleOcrFfiService.initialize();
+      if (mounted) {
+        setState(() {
+          _isEngineReady = ready;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isEngineReady = false;
+        });
+      }
     }
-  }
-
-  void _showApiKeyDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => ApiKeyDialog(
-        currentApiKey: _apiKey,
-        currentModel: _selectedModel,
-        onSaved: (newKey, newModel) {
-          setState(() {
-            _apiKey = newKey;
-            _selectedModel = newModel;
-          });
-        },
-      ),
-    );
   }
 
   Future<void> _pickImage(ImageSource source) async {
     try {
       final XFile? file = await _picker.pickImage(
         source: source,
-        imageQuality: 92, // Keep good quality for OCR
+        imageQuality: 92,
       );
 
       if (file != null) {
@@ -84,12 +64,8 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
           _errorMessage = null;
         });
 
-        // Automatically trigger OCR if API key is present
-        if (_apiKey != null && _apiKey!.isNotEmpty) {
-          _runOcr();
-        } else {
-          _showApiKeyDialog();
-        }
+        // Trigger OCR offline automatically
+        _runPaddleOcr();
       }
     } catch (e) {
       setState(() {
@@ -98,16 +74,11 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
     }
   }
 
-  Future<void> _runOcr() async {
+  Future<void> _runPaddleOcr() async {
     if (_selectedImageBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Vui lòng chụp hoặc tải ảnh lên trước.')),
       );
-      return;
-    }
-
-    if (_apiKey == null || _apiKey!.isEmpty) {
-      _showApiKeyDialog();
       return;
     }
 
@@ -117,10 +88,8 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
     });
 
     try {
-      final result = await GeminiOcrService.performOcr(
+      final result = await PaddleOcrFfiService.inferOcr(
         imageBytes: _selectedImageBytes!,
-        apiKey: _apiKey!,
-        model: _selectedModel,
       );
 
       setState(() {
@@ -166,8 +135,6 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool hasKey = _apiKey != null && _apiKey!.isNotEmpty;
-
     return Scaffold(
       backgroundColor: AppTheme.bgDark,
       appBar: AppBar(
@@ -182,41 +149,39 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                 ),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.document_scanner_rounded, size: 20, color: Colors.white),
+              child: const Icon(Icons.bolt_rounded, size: 20, color: Colors.white),
             ),
             const SizedBox(width: 10),
-            const Text('Gemini OCR App'),
+            const Text('PaddleOCR NCNN Mobile'),
           ],
         ),
         actions: [
-          // API Key status pill
           Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: ActionChip(
+            padding: const EdgeInsets.only(right: 14),
+            child: Chip(
               avatar: Icon(
-                hasKey ? Icons.key_rounded : Icons.warning_amber_rounded,
-                size: 16,
-                color: hasKey ? AppTheme.secondary : AppTheme.warning,
+                _isEngineReady ? Icons.offline_bolt_rounded : Icons.sync_rounded,
+                size: 15,
+                color: _isEngineReady ? AppTheme.secondary : AppTheme.warning,
               ),
               label: Text(
-                hasKey ? 'Key: Đã lưu' : 'Chưa có Key',
+                _isEngineReady ? 'Offline 100%' : 'Đang nạp Model',
                 style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: hasKey ? AppTheme.secondary : AppTheme.warning,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _isEngineReady ? AppTheme.secondary : AppTheme.warning,
                 ),
               ),
-              backgroundColor: hasKey
+              backgroundColor: _isEngineReady
                   ? AppTheme.secondary.withValues(alpha: 0.12)
                   : AppTheme.warning.withValues(alpha: 0.12),
               side: BorderSide(
-                color: hasKey
+                color: _isEngineReady
                     ? AppTheme.secondary.withValues(alpha: 0.4)
                     : AppTheme.warning.withValues(alpha: 0.4),
                 width: 1,
               ),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              onPressed: _showApiKeyDialog,
             ),
           ),
         ],
@@ -227,48 +192,34 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Banner / Model Info
+              // Banner Info: 100% On-Device
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      AppTheme.primary.withValues(alpha: 0.15),
-                      AppTheme.secondary.withValues(alpha: 0.08),
+                      AppTheme.secondary.withValues(alpha: 0.12),
+                      AppTheme.primary.withValues(alpha: 0.08),
                     ],
                   ),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.2),
+                    color: AppTheme.secondary.withValues(alpha: 0.25),
                     width: 1,
                   ),
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    const Icon(Icons.auto_awesome_rounded, color: AppTheme.primaryLight, size: 20),
-                    const SizedBox(width: 10),
+                    Icon(Icons.memory_rounded, color: AppTheme.secondary, size: 22),
+                    SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Mô hình: $_selectedModel • Nhận diện văn bản, chữ viết tay & bảng',
-                        style: const TextStyle(
+                        'PaddleOCR DBNet + CRNN trên Tencent NCNN Engine\nChạy trực tiếp trên phần cứng máy • Không cần mạng hay API Key',
+                        style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.textSecondary,
                           fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: _showApiKeyDialog,
-                      borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        child: Text(
-                          'Đổi',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.primaryLight,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          height: 1.4,
                         ),
                       ),
                     ),
@@ -278,14 +229,14 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
 
               const SizedBox(height: 18),
 
-              // Hero Input Choice Cards
+              // Action Cards (Chụp ảnh & Tải ảnh)
               Row(
                 children: [
                   Expanded(
                     child: _buildActionCard(
                       icon: Icons.camera_alt_rounded,
                       title: 'Chụp ảnh',
-                      subtitle: 'Dùng Camera',
+                      subtitle: 'Quét văn bản',
                       color: AppTheme.primary,
                       onTap: () => _pickImage(ImageSource.camera),
                     ),
@@ -295,7 +246,7 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                     child: _buildActionCard(
                       icon: Icons.photo_library_rounded,
                       title: 'Tải ảnh lên',
-                      subtitle: 'Từ thư viện ảnh',
+                      subtitle: 'Từ thư viện máy',
                       color: AppTheme.secondary,
                       onTap: () => _pickImage(ImageSource.gallery),
                     ),
@@ -305,7 +256,7 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
 
               const SizedBox(height: 20),
 
-              // Image Preview Card (if selected)
+              // Image Preview Section
               if (_selectedImageBytes != null) ...[
                 _buildImagePreviewSection(),
                 const SizedBox(height: 20),
@@ -317,7 +268,7 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                 const SizedBox(height: 20),
               ],
 
-              // Error Message Card
+              // Error Section
               if (_errorMessage != null) ...[
                 _buildErrorSection(),
                 const SizedBox(height: 20),
@@ -329,7 +280,7 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                 const SizedBox(height: 30),
               ],
 
-              // Empty state guide if nothing selected yet
+              // Empty state guide
               if (_selectedImageBytes == null && !_isLoading)
                 _buildEmptyStateGuide(),
             ],
@@ -476,11 +427,12 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
               Expanded(
                 flex: 2,
                 child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _runOcr,
-                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                  onPressed: _isLoading ? null : _runPaddleOcr,
+                  icon: const Icon(Icons.bolt_rounded, size: 20),
                   label: const Text('Nhận diện lại'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
+                    backgroundColor: AppTheme.secondary,
+                    foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                 ),
@@ -498,30 +450,30 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3), width: 1),
+        border: Border.all(color: AppTheme.secondary.withValues(alpha: 0.3), width: 1),
       ),
-      child: Column(
+      child: const Column(
         children: [
-          const SizedBox(
-            width: 48,
-            height: 48,
+          SizedBox(
+            width: 44,
+            height: 44,
             child: CircularProgressIndicator(
               strokeWidth: 3.5,
-              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.secondary),
             ),
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'Gemini AI đang phân tích ảnh...',
+          SizedBox(height: 16),
+          Text(
+            'PaddleOCR NCNN đang nhận diện...',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: AppTheme.textPrimary,
             ),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Đang nhận diện ký tự quang học, bố cục bảng và ngôn ngữ...',
+          SizedBox(height: 6),
+          Text(
+            'Xử lý trực tiếp trên thiết bị (DBNet Detection + CRNN Recognition)',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: AppTheme.textMuted),
           ),
@@ -541,12 +493,12 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.error_outline_rounded, color: AppTheme.danger, size: 22),
-              const SizedBox(width: 8),
-              const Text(
-                'Lỗi nhận diện OCR',
+              Icon(Icons.error_outline_rounded, color: AppTheme.danger, size: 22),
+              SizedBox(width: 8),
+              Text(
+                'Thông báo Engine',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
@@ -561,23 +513,16 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
             style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary, height: 1.4),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton.icon(
-                onPressed: _showApiKeyDialog,
-                icon: const Icon(Icons.vpn_key_rounded, size: 16, color: AppTheme.primaryLight),
-                label: const Text('Kiểm tra API Key', style: TextStyle(color: AppTheme.primaryLight)),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton(
+              onPressed: _runPaddleOcr,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.danger.withValues(alpha: 0.8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
-              const Spacer(),
-              ElevatedButton(
-                onPressed: _runOcr,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.danger.withValues(alpha: 0.8),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                ),
-                child: const Text('Thử lại'),
-              ),
-            ],
+              child: const Text('Thử lại'),
+            ),
           ),
         ],
       ),
@@ -620,7 +565,7 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Kết quả OCR',
+                    'Kết quả OCR (NCNN Offline)',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
@@ -628,13 +573,12 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
                     ),
                   ),
                   Text(
-                    'Trích xuất văn bản thành công',
+                    'Nhận dạng thành công không cần mạng',
                     style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                   ),
                 ],
               ),
               const Spacer(),
-              // Quick Copy Button
               ElevatedButton.icon(
                 onPressed: _copyToClipboard,
                 icon: const Icon(Icons.copy_rounded, size: 16),
@@ -650,16 +594,16 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          // Stats row
           Row(
             children: [
               _buildStatChip(Icons.short_text_rounded, '$wordCount từ'),
               const SizedBox(width: 8),
               _buildStatChip(Icons.format_size_rounded, '$charCount ký tự'),
+              const SizedBox(width: 8),
+              _buildStatChip(Icons.flash_on_rounded, 'NCNN C++ Engine'),
             ],
           ),
           const SizedBox(height: 16),
-          // Recognized text container
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
@@ -713,21 +657,21 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF202646), width: 1),
       ),
-      child: Column(
+      child: const Column(
         children: [
-          const Icon(Icons.lightbulb_outline_rounded, color: AppTheme.warning, size: 32),
-          const SizedBox(height: 12),
-          const Text(
-            'Hướng dẫn sử dụng',
+          Icon(Icons.bolt_rounded, color: AppTheme.secondary, size: 36),
+          SizedBox(height: 12),
+          Text(
+            'PaddleOCR Offline Engine',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: AppTheme.textPrimary,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            '1. Nhấn nút [Chụp ảnh] hoặc [Tải ảnh lên] để chọn ảnh tài liệu, hóa đơn, biển báo hoặc chữ viết tay.\n2. Cài đặt Gemini API Key của bạn (chỉ cần nhập 1 lần).\n3. Ứng dụng sẽ tự động phân tích và trích xuất nội dung văn bản cho bạn.',
+          SizedBox(height: 8),
+          Text(
+            '1. Nhấn nút [Chụp ảnh] hoặc [Tải ảnh lên] từ máy.\n2. Ứng dụng tự động kích hoạt C++ FFI Engine nhận diện văn bản hoàn toàn ngoại tuyến.\n3. Kết quả OCR được trả về ngay lập tức trên máy của bạn.',
             textAlign: TextAlign.start,
             style: TextStyle(
               fontSize: 13,
@@ -740,4 +684,3 @@ class _OcrHomeScreenState extends State<OcrHomeScreen> {
     ).animate().fadeIn(delay: 200.ms, duration: 400.ms);
   }
 }
-

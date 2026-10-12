@@ -6,7 +6,6 @@ import 'screens/ocr_home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Set system UI style (transparent status bar)
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -14,16 +13,16 @@ void main() async {
     ),
   );
 
-  runApp(const GeminiOcrApp());
+  runApp(const PaddleOcrApp());
 }
 
-class GeminiOcrApp extends StatelessWidget {
-  const GeminiOcrApp({super.key});
+class PaddleOcrApp extends StatelessWidget {
+  const PaddleOcrApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Gemini OCR App',
+      title: 'PaddleOCR NCNN Mobile',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       home: const OcrHomeScreen(),

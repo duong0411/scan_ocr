@@ -87,10 +87,14 @@ class PaddleOcrFfiService {
         await modelsDir.create(recursive: true);
       }
 
-      final detParam = await _copyAssetToFile('assets/models/ch_PP-OCRv4_det_infer.param', '${modelsDir.path}/det.param');
-      final detBin = await _copyAssetToFile('assets/models/ch_PP-OCRv4_det_infer.bin', '${modelsDir.path}/det.bin');
-      final recParam = await _copyAssetToFile('assets/models/ch_PP-OCRv4_rec_infer.param', '${modelsDir.path}/rec.param');
-      final recBin = await _copyAssetToFile('assets/models/ch_PP-OCRv4_rec_infer.bin', '${modelsDir.path}/rec.bin');
+      final detParam = await _copyAssetToFile('assets/models/ch_PP-OCRv3_det_infer.param', '${modelsDir.path}/det.param') ??
+          await _copyAssetToFile('assets/models/ch_PP-OCRv4_det_infer.param', '${modelsDir.path}/det.param');
+      final detBin = await _copyAssetToFile('assets/models/ch_PP-OCRv3_det_infer.bin', '${modelsDir.path}/det.bin') ??
+          await _copyAssetToFile('assets/models/ch_PP-OCRv4_det_infer.bin', '${modelsDir.path}/det.bin');
+      final recParam = await _copyAssetToFile('assets/models/ch_PP-OCRv3_rec_infer.param', '${modelsDir.path}/rec.param') ??
+          await _copyAssetToFile('assets/models/ch_PP-OCRv4_rec_infer.param', '${modelsDir.path}/rec.param');
+      final recBin = await _copyAssetToFile('assets/models/ch_PP-OCRv3_rec_infer.bin', '${modelsDir.path}/rec.bin') ??
+          await _copyAssetToFile('assets/models/ch_PP-OCRv4_rec_infer.bin', '${modelsDir.path}/rec.bin');
       final keysPath = await _copyAssetToFile('assets/models/ppocr_keys_v1.txt', '${modelsDir.path}/keys.txt');
 
       if (detParam != null && detBin != null && recParam != null && recBin != null && keysPath != null) {
